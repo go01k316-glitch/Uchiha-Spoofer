@@ -50,6 +50,33 @@ void IdentityManager::UpdateFakeIdentity(const Core::Identity& identity) {
     UCHIHA_LOG_INFO("[Identity] Danh tính giả đã cập nhật");
 }
 
+void IdentityManager::SetCustomIdentity(const Core::Identity& custom) {
+    fakeIdentity_ = custom;
+    UCHIHA_LOG_INFO("[Identity] Đã set custom identity");
+}
+
+bool IdentityManager::ValidateIdentity(const Core::Identity& identity) const {
+    // Validate MAC address format (XX:XX:XX:XX:XX:XX)
+    if (identity.macAddress.length() != 17) {
+        UCHIHA_LOG_ERROR("[Identity] Invalid MAC format");
+        return false;
+    }
+
+    // Validate GUID format
+    if (identity.registryGuid.length() < 36) {
+        UCHIHA_LOG_ERROR("[Identity] Invalid GUID format");
+        return false;
+    }
+
+    // Validate PC name (not empty)
+    if (identity.pcName.empty() || identity.pcName.length() > 15) {
+        UCHIHA_LOG_ERROR("[Identity] Invalid PC name");
+        return false;
+    }
+
+    return true;
+}
+
 void IdentityManager::SaveConfiguration() {
     try {
         std::ofstream file("config.ini");
@@ -58,9 +85,10 @@ void IdentityManager::SaveConfiguration() {
                 "Cannot open config.ini for writing");
         }
 
-        // Lưu cấu hình spoofing (từ UI state)
-        // Đây là nơi bạn sẽ lưu các tùy chọn checkbox
         file << "# Uchiha Spoofer Configuration\n";
+        file << "LastMAC=" << fakeIdentity_.macAddress << "\n";
+        file << "LastGUID=" << fakeIdentity_.registryGuid << "\n";
+        file << "LastPCName=" << fakeIdentity_.pcName << "\n";
         file.close();
 
         UCHIHA_LOG_INFO("[Config] Đã lưu cấu hình");
@@ -74,13 +102,15 @@ void IdentityManager::LoadConfiguration() {
     try {
         std::ifstream file("config.ini");
         if (!file.is_open()) {
-            // Config file chưa tồn tại, không cần throw error
             UCHIHA_LOG_INFO("[Config] Config file không tồn tại, sử dụng mặc định");
             return;
         }
 
-        // Đọc cấu hình
-        // Bạn sẽ parse dòng từ file ở đây
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.empty() || line[0] == '#') continue;
+            // Parse config lines if needed
+        }
 
         file.close();
         UCHIHA_LOG_INFO("[Config] Đã tải cấu hình");

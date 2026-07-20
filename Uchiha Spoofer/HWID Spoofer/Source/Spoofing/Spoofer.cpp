@@ -1,9 +1,11 @@
 #pragma execution_character_set("utf-8")
 #include "Spoofer.h"
 #include "IdentityManager.h"
+#include "BackupManager.h"
 #include "../Driver/DriverManager.h"
 #include "../Utils/SystemUtils.h"
 #include "../Utils/Logger.h"
+#include "../Utils/AsyncWorker.h"
 #include <thread>
 #include <chrono>
 
@@ -14,6 +16,10 @@ void Spoofer::StartSpoofing(ProgressCallback onProgress) {
         UCHIHA_LOG_WARNING("[Spoof] Một thao tác khác đang chạy");
         return;
     }
+
+    // Auto backup trước khi spoof
+    UCHIHA_LOG_INFO("[Spoof] Tạo auto backup...");
+    BackupManager::GetInstance().AutoBackup();
 
     cancelRequested_ = false;
     std::thread worker(&Spoofer::SpoofingWorkerThread, this, onProgress);
@@ -102,15 +108,45 @@ void Spoofer::DoSpoof() {
     const auto& fakeID = idManager.GetFakeIdentity();
 
     try {
+        // Validate identity trước khi spoof
+        if (!idManager.ValidateIdentity(fakeID)) {
+            throw Core::UchihaException(Core::ErrorCode::InvalidParameter,
+                "Invalid identity for spoofing");
+        }
+
         // Thay đổi Registry
         if (config_.selectPCName) {
             Utils::SystemUtils::SetComputerName(fakeID.pcName);
+            UCHIHA_LOG_INFO("[Spoof] Changed PC name to: " + fakeID.pcName);
         }
         if (config_.selectGUID) {
             Utils::SystemUtils::WriteRegistry(
                 "SOFTWARE\\Microsoft\\Cryptography", "MachineGuid", fakeID.registryGuid);
+            UCHIHA_LOG_INFO("[Spoof] Changed Machine GUID");
         }
-        // ... thêm các thay đổi khác
+        if (config_.selectVolC) {
+            Utils::SystemUtils::WriteVolumeSerial('C', fakeID.volC_Raw);
+            UCHIHA_LOG_INFO("[Spoof] Changed Volume C serial");
+        }
+        if (config_.selectVolD) {
+            Utils::SystemUtils::WriteVolumeSerial('D', fakeID.volD_Raw);
+            UCHIHA_LOG_INFO("[Spoof] Changed Volume D serial");
+        }
+
+        // CPU/BIOS spoofing nếu driver available
+        if (config_.selectCPU || config_.selectBIOS) {
+            auto& driverMgr = Driver::DriverManager::GetInstance();
+            if (driverMgr.IsLoaded()) {
+                if (config_.selectCPU) {
+                    driverMgr.SpoofCPU();
+                    UCHIHA_LOG_INFO("[Spoof] Spoofed CPU via driver");
+                }
+                if (config_.selectBIOS) {
+                    driverMgr.SpoofBIOS();
+                    UCHIHA_LOG_INFO("[Spoof] Spoofed BIOS via driver");
+                }
+            }
+        }
 
         UCHIHA_LOG_INFO("[Spoof] Spoof logic đã thực hiện");
     }
@@ -128,7 +164,8 @@ void Spoofer::DoRecover() {
         Utils::SystemUtils::SetComputerName(originalID.pcName);
         Utils::SystemUtils::WriteRegistry(
             "SOFTWARE\\Microsoft\\Cryptography", "MachineGuid", originalID.registryGuid);
-        // ... thêm các khôi phục khác
+        Utils::SystemUtils::WriteVolumeSerial('C', originalID.volC_Raw);
+        Utils::SystemUtils::WriteVolumeSerial('D', originalID.volD_Raw);
 
         UCHIHA_LOG_INFO("[Recover] Recovery logic đã thực hiện");
     }

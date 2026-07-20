@@ -1,6 +1,7 @@
 #pragma execution_character_set("utf-8")
 #include "SystemUtils.h"
 #include "Logger.h"
+#include "CacheManager.h"
 #include <windows.h>
 #include <iphlpapi.h>
 #include <winioctl.h>
@@ -12,6 +13,14 @@ pragma comment(lib, "Ws2_32.lib")
 namespace UchihaSpoofer::Utils {
 
 std::string SystemUtils::ReadRegistry(const std::string& path, const std::string& key) {
+    // Kiểm tra cache trước
+    auto& cache = RegistryCache::GetInstance();
+    std::string cachedValue;
+    if (cache.GetCached(path, key, cachedValue)) {
+        UCHIHA_LOG_DEBUG("[Cache] Registry hit: " + path + " -> " + key);
+        return cachedValue;
+    }
+
     HKEY hKey;
     char val[256] = {0};
     DWORD sz = sizeof(val);
@@ -30,7 +39,10 @@ std::string SystemUtils::ReadRegistry(const std::string& path, const std::string
             "Key: " + key);
     }
 
-    return std::string(val);
+    std::string value(val);
+    // Cache the result
+    cache.SetCached(path, key, value);
+    return value;
 }
 
 void SystemUtils::WriteRegistry(const std::string& path, const std::string& key, const std::string& value) {
@@ -50,6 +62,10 @@ void SystemUtils::WriteRegistry(const std::string& path, const std::string& key,
         throw Core::UchihaException(Core::ErrorCode::RegistryWriteFailed,
             "Key: " + key);
     }
+
+    // Invalidate cache after write
+    RegistryCache::GetInstance().InvalidateCache();
+    UCHIHA_LOG_DEBUG("[Cache] Registry write, invalidated cache");
 }
 
 void SystemUtils::DeleteRegistry(const std::string& path, const std::string& key) {
@@ -68,6 +84,9 @@ void SystemUtils::DeleteRegistry(const std::string& path, const std::string& key
         throw Core::UchihaException(Core::ErrorCode::RegistryDeleteFailed,
             "Key: " + key);
     }
+
+    // Invalidate cache
+    RegistryCache::GetInstance().InvalidateCache();
 }
 
 std::string SystemUtils::GetMachineGUID() {
