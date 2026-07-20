@@ -20,6 +20,8 @@
 #include "Source/Utils/SystemUtils.h"
 #include "Source/Utils/StringUtils.h"
 #include "Source/Utils/FileUtils.h"
+#include "Source/Utils/CacheManager.h"
+#include "Source/Utils/AsyncWorker.h"
 
 // Driver module
 #include "Source/Driver/DriverManager.h"
@@ -28,6 +30,9 @@
 #include "Source/Spoofing/IdentityManager.h"
 #include "Source/Spoofing/Spoofer.h"
 #include "Source/Spoofing/DeepCleaner.h"
+#include "Source/Spoofing/ConfigManager.h"
+#include "Source/Spoofing/HWIDPresets.h"
+#include "Source/Spoofing/BackupManager.h"
 
 // UI modules
 #include "Source/UI/UIManager.h"
@@ -49,6 +54,13 @@ struct AppState {
     Core::OperationProgress spoofProgress;
     Core::OperationProgress recoveryProgress;
     Core::OperationProgress cleanProgress;
+    
+    // Profile management
+    std::vector<std::string> profileList;
+    int selectedProfileIdx = 0;
+    char customHWIDInput[256] = {0};
+    int selectedPresetIdx = 0;
+    int selectedBackupIdx = 0;
 };
 
 static AppState g_appState;
@@ -64,7 +76,6 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_SIZE:
         if (msg == WM_SIZE && wParam != SIZE_MINIMIZED) {
             auto& ui = UI::UIManager::GetInstance();
-            // Resize logic sẽ được handle trong UI manager
         }
         return 0;
     case WM_SYSCOMMAND:
@@ -84,13 +95,13 @@ void RenderMainUI() {
     auto& io = ImGui::GetIO();
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(950, 525));
+    ImGui::SetNextWindowSize(ImVec2(1050, 650));
     ImGui::Begin("MainPanel", NULL,
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
     // --- SIDEBAR BÊN TRÁI ---
-    ImGui::BeginChild("Sidebar", ImVec2(220, 0), true);
+    ImGui::BeginChild("Sidebar", ImVec2(240, 0), true);
     ImGui::Spacing();
     ImGui::TextColored(ImVec4(1.0f, 0.15f, 0.15f, 1.0f), "  U C H I H A - H I T A C H I");
     ImGui::Spacing();
@@ -119,19 +130,21 @@ void RenderMainUI() {
                                g_appState.cleanProgress.isRunning;
 
     ImGui::BeginDisabled(operationInProgress);
-    if (ImGui::Button("Trang Chủ", ImVec2(200, 40))) g_appState.activeTab = 0;
-    if (ImGui::Button("Thay Đổi HWID", ImVec2(200, 40))) g_appState.activeTab = 1;
-    if (ImGui::Button("Dọn Dẹp Dấu Vết", ImVec2(200, 40))) g_appState.activeTab = 2;
-    if (ImGui::Button("Hướng Dẫn Sử Dụng", ImVec2(200, 40))) g_appState.activeTab = 3;
+    if (ImGui::Button("Trang Chủ", ImVec2(220, 40))) g_appState.activeTab = 0;
+    if (ImGui::Button("Thay Đổi HWID", ImVec2(220, 40))) g_appState.activeTab = 1;
+    if (ImGui::Button("Quản Lý Profile", ImVec2(220, 40))) g_appState.activeTab = 2;
+    if (ImGui::Button("Dọn Dẹp Dấu Vết", ImVec2(220, 40))) g_appState.activeTab = 3;
+    if (ImGui::Button("Quản Lý Backup", ImVec2(220, 40))) g_appState.activeTab = 4;
+    if (ImGui::Button("Hướng Dẫn Sử Dụng", ImVec2(220, 40))) g_appState.activeTab = 5;
     ImGui::EndDisabled();
 
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 50);
-    ImGui::Text("Phiên Bản: 4.0.0\nRefactored Edition");
+    ImGui::Text("Phiên Bản: 4.0.0\nOptimized Edition");
     ImGui::EndChild();
 
     ImGui::SameLine();
 
-    // --- XỬ LÝ FADE-IN CHUYỂN TAB MƯỢT MÀ ---
+    // --- XỬ LÝ FADE-IN CHUYỂN TAB MỊU MÀ ---
     if (g_appState.activeTab != g_appState.previousTab) {
         g_appState.tabAlpha = 0.0f;
         g_appState.previousTab = g_appState.activeTab;
@@ -150,7 +163,7 @@ void RenderMainUI() {
     const auto& fakeID = idManager.GetFakeIdentity();
 
     if (g_appState.activeTab == 0) {
-        // Tab 0: Trang Chủ - Hiển thị trạng thái HWID hiện tại
+        // Tab 0: Trang Chủ
         UI::UIComponents::ShowSectionHeader("TRẠNG THÁI HWID HIỆN TẠI HỆ THỐNG",
             UI::UIStyles::GetColorRed());
 
@@ -175,9 +188,20 @@ void RenderMainUI() {
             (g_appState.isSpoofed ? fakeID.volCSerialStr.c_str() : originalID.volCSerialStr.c_str()));
         ImGui::Text("MÃ SERIAL Ổ D: %s",
             (g_appState.isSpoofed ? fakeID.volDSerialStr.c_str() : originalID.volDSerialStr.c_str()));
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Status indicator
+        if (g_appState.isSpoofed) {
+            UI::UIComponents::ShowStatusBadge("HỆ THỐNG ĐÃ ĐƯỢC NGỤ TRANG", UI::UIStyles::GetColorRed(), true);
+        } else {
+            UI::UIComponents::ShowStatusBadge("HỆ THỐNG TRẠNG THÁI BÌNH THƯỜNG", UI::UIStyles::GetColorGreen(), false);
+        }
     }
     else if (g_appState.activeTab == 1) {
-        // Tab 1: Thay Đổi HWID - Các checkbox và control
+        // Tab 1: Thay Đổi HWID
         ImGui::BeginDisabled(operationInProgress);
         ImGui::Columns(2, "options_col", false);
 
@@ -192,7 +216,7 @@ void RenderMainUI() {
         ImGui::NextColumn();
 
         UI::UIComponents::ShowSectionHeader("Thay đổi mã Ổ cứng (Volume ID)");
-        ImGui::Checkbox("Thay đ���i mã Serial ổ đĩa [C:]", &g_appState.spoofConfig.selectVolC);
+        ImGui::Checkbox("Thay đổi mã Serial ổ đĩa [C:]", &g_appState.spoofConfig.selectVolC);
         ImGui::Checkbox("Thay đổi mã Serial ổ đĩa [D:]", &g_appState.spoofConfig.selectVolD);
         ImGui::Spacing();
 
@@ -213,6 +237,25 @@ void RenderMainUI() {
 
         ImGui::Spacing();
         ImGui::Separator();
+        ImGui::Spacing();
+
+        // Presets
+        auto presets = Spoofing::HWIDPresets::GetAvailablePresets();
+        if (ImGui::Combo("Quick Presets", &g_appState.selectedPresetIdx, 
+                         [](void* data, int idx, const char** out_text) {
+                             auto* presets_ptr = (std::vector<std::string>*)data;
+                             if (idx < 0 || idx >= (int)presets_ptr->size()) return false;
+                             *out_text = (*presets_ptr)[idx].c_str();
+                             return true;
+                         }, 
+                         (void*)&presets, presets.size())) {
+            if (g_appState.selectedPresetIdx < (int)presets.size()) {
+                auto preset = Spoofing::HWIDPresets::GetPreset(presets[g_appState.selectedPresetIdx]);
+                idManager.SetCustomIdentity(preset);
+                UCHIHA_LOG_INFO("[UI] Applied preset: " + presets[g_appState.selectedPresetIdx]);
+            }
+        }
+
         ImGui::Spacing();
 
         // Progress bar hoặc buttons
@@ -265,7 +308,62 @@ void RenderMainUI() {
         }
     }
     else if (g_appState.activeTab == 2) {
-        // Tab 2: Dọn Dẹp Dấu Vết
+        // Tab 2: Quản Lý Profile
+        UI::UIComponents::ShowSectionHeader("QUẢN LÝ CẤU HÌNH SPOOF (PROFILES)");
+
+        auto& configMgr = Spoofing::ConfigManager::GetInstance();
+        g_appState.profileList = configMgr.GetProfileList();
+
+        ImGui::Text("Các Profile đã lưu (%zu):", g_appState.profileList.size());
+        ImGui::ListBoxHeader("##profiles", ImVec2(400, 150));
+        for (size_t i = 0; i < g_appState.profileList.size(); i++) {
+            if (ImGui::Selectable(g_appState.profileList[i].c_str(), g_appState.selectedProfileIdx == (int)i)) {
+                g_appState.selectedProfileIdx = i;
+            }
+        }
+        ImGui::ListBoxFooter();
+
+        ImGui::Spacing();
+
+        ImGui::BeginDisabled(operationInProgress || g_appState.selectedProfileIdx >= (int)g_appState.profileList.size());
+        if (ImGui::Button("Load Profile", ImVec2(100, 30))) {
+            if (g_appState.selectedProfileIdx < (int)g_appState.profileList.size()) {
+                Spoofing::SpoofProfile profile;
+                if (configMgr.LoadProfile(g_appState.profileList[g_appState.selectedProfileIdx], profile)) {
+                    idManager.SetCustomIdentity(profile.identity);
+                    g_appState.spoofConfig = profile.config;
+                    UCHIHA_LOG_INFO("[UI] Loaded profile: " + g_appState.profileList[g_appState.selectedProfileIdx]);
+                }
+            }
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        if (ImGui::Button("Delete Profile", ImVec2(100, 30))) {
+            if (g_appState.selectedProfileIdx < (int)g_appState.profileList.size()) {
+                configMgr.DeleteProfile(g_appState.profileList[g_appState.selectedProfileIdx]);
+                g_appState.selectedProfileIdx = 0;
+            }
+        }
+
+        ImGui::SameLine();
+        static char profileName[64] = {0};
+        ImGui::InputText("Profile Name", profileName, sizeof(profileName));
+
+        ImGui::SameLine();
+        if (ImGui::Button("Save as Profile", ImVec2(120, 30))) {
+            if (strlen(profileName) > 0) {
+                Spoofing::SpoofProfile newProfile;
+                newProfile.name = profileName;
+                newProfile.identity = idManager.GetFakeIdentity();
+                newProfile.config = g_appState.spoofConfig;
+                configMgr.SaveProfile(profileName, newProfile);
+                memset(profileName, 0, sizeof(profileName));
+            }
+        }
+    }
+    else if (g_appState.activeTab == 3) {
+        // Tab 3: Dọn Dẹp Dấu Vết
         UI::UIComponents::ShowSectionHeader("HỆ THỐNG DỌN DẸP SÂU HƠN (DEEP CLEAN ENGINE)");
 
         ImGui::Text("Chức năng này sẽ dọn sạch mọi file Log, bộ nhớ đệm Tracking, Registry rác của");
@@ -283,7 +381,7 @@ void RenderMainUI() {
         }
         else {
             ImGui::BeginDisabled(operationInProgress);
-            if (ImGui::Button("KÍCH HOẠT DEEP CLEAN (QUÉT SẠCH DẤU VẾT)", ImVec2(350, 45))) {
+            if (ImGui::Button("KÍCH HOẠT DEEP CLEAN (QUÉT SẠCH DẤU VẾT)", ImVec2(450, 45))) {
                 auto& cleaner = Spoofing::DeepCleaner::GetInstance();
                 cleaner.StartDeepClean([](float progress, const std::string& task) {
                     g_appState.cleanProgress.progress = progress;
@@ -295,8 +393,49 @@ void RenderMainUI() {
             ImGui::EndDisabled();
         }
     }
-    else if (g_appState.activeTab == 3) {
-        // Tab 3: Hướng Dẫn Sử Dụng
+    else if (g_appState.activeTab == 4) {
+        // Tab 4: Quản Lý Backup
+        UI::UIComponents::ShowSectionHeader("QUẢN LÝ BACKUP & KHÔI PHỤC");
+
+        auto& backupMgr = Spoofing::BackupManager::GetInstance();
+        auto backupList = backupMgr.GetBackupList();
+
+        ImGui::Text("Các Backup đã lưu (%zu):", backupList.size());
+        ImGui::ListBoxHeader("##backups", ImVec2(400, 150));
+        for (size_t i = 0; i < backupList.size(); i++) {
+            if (ImGui::Selectable(backupList[i].c_str(), g_appState.selectedBackupIdx == (int)i)) {
+                g_appState.selectedBackupIdx = i;
+            }
+        }
+        ImGui::ListBoxFooter();
+
+        ImGui::Spacing();
+
+        ImGui::BeginDisabled(operationInProgress || g_appState.selectedBackupIdx >= (int)backupList.size());
+        if (ImGui::Button("Restore Backup", ImVec2(150, 30))) {
+            if (g_appState.selectedBackupIdx < (int)backupList.size()) {
+                backupMgr.RestoreBackup(backupList[g_appState.selectedBackupIdx]);
+                UCHIHA_LOG_INFO("[UI] Restored backup: " + backupList[g_appState.selectedBackupIdx]);
+            }
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        if (ImGui::Button("Delete Backup", ImVec2(150, 30))) {
+            if (g_appState.selectedBackupIdx < (int)backupList.size()) {
+                backupMgr.DeleteBackup(backupList[g_appState.selectedBackupIdx]);
+                g_appState.selectedBackupIdx = 0;
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Manual Backup Now", ImVec2(150, 30))) {
+            backupMgr.CreateBackup();
+            UCHIHA_LOG_INFO("[UI] Manual backup created");
+        }
+    }
+    else if (g_appState.activeTab == 5) {
+        // Tab 5: Hướng Dẫn Sử Dụng
         UI::UIComponents::ShowSectionHeader("CẨM NANG HƯỚNG DẪN SỬ DỤNG PHẦN MỀM");
 
         ImGui::BulletText("BƯỚC 1: Hãy chắc chắn khởi động Spoofer bằng quyền Trực tiếp Quản trị viên (Admin).");
@@ -304,19 +443,25 @@ void RenderMainUI() {
         ImGui::BulletText("BƯỚC 3: Nhấn nút 'BẮT ĐẦU SPOOF'. Hệ thống mạng sẽ làm mới trong vòng 3 giây để đổi MAC.");
         ImGui::BulletText("BƯỚC 4: Chuyển qua Tab 'Dọn Dẹp Dấu Vết', nhấn nút dọn dẹp để quét sạch cache Registry cũ của Game.");
         ImGui::BulletText("BƯỚC 5: Khi muốn chơi game bình thường và trả lại ID thật, hãy nhấn 'KHÔI PHỤC GỐC'.");
+        ImGui::BulletText("\nBỏ qua: Sử dụng Tab 'Quản Lý Profile' để lưu cấu hình và tái sử dụng nhanh chóng.");
+        ImGui::BulletText("\nQuản Lý Backup: Tab 'Quản Lý Backup' cho phép bạn tạo & khôi phục từ backup tự động.");
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
         ImGui::TextColored(UI::UIStyles::GetColorOrange(),
-            "Mẹo nhỏ: Với các game quét dọc gắt gao, hãy chạy 'Deep Clean' trước rồi mới bấm Spoof!");
+            "Mẹo nhỏ: Với các game quét dọc gặt gao, hãy chạy 'Deep Clean' trước rồi mới bấm Spoof!");
+        
+        ImGui::Spacing();
+        ImGui::TextColored(UI::UIStyles::GetColorGreen(),
+            "🎉 Chúc bạn sử dụng vui vẻ với Uchiha Spoofer!");
     }
 
     // --- CONSOLE LOG BOX ---
-    ImGui::SetCursorPosY(355);
+    ImGui::SetCursorPosY(450);
     ImGui::Text("Nhật ký hoạt động (System Logs)");
-    ImGui::BeginChild("ConsoleLog", ImVec2(700, 120), true);
+    ImGui::BeginChild("ConsoleLog", ImVec2(750, 150), true);
 
     auto logs = Utils::Logger::GetInstance().GetRecentLogs(50);
     for (const auto& log : logs) {
@@ -338,7 +483,7 @@ int main(int, char**) {
 
         // Khởi tạo Logger
         auto& logger = Utils::Logger::GetInstance();
-        logger.Info("[MAIN] Uchiha Spoofer v4.0.0 - Refactored Edition");
+        logger.Info("[MAIN] Uchiha Spoofer v4.0.0 - Optimized Edition");
         logger.Info("[MAIN] Khởi động ứng dụng...");
 
         // Khởi tạo Identity Manager và load original identity
@@ -346,6 +491,10 @@ int main(int, char**) {
         idManager.LoadOriginalIdentity();
         idManager.GenerateFakeIdentity();
         g_appState.spoofConfig = Core::SpoofConfig();
+
+        // Khởi tạo Config Manager
+        auto& configMgr = Spoofing::ConfigManager::GetInstance();
+        configMgr.LoadAllProfiles();
 
         // Khởi tạo Driver Manager
         auto& driverMgr = Driver::DriverManager::GetInstance();
@@ -360,8 +509,8 @@ int main(int, char**) {
         RegisterClassExA(&wc);
 
         g_hwnd = CreateWindowA(wc.lpszClassName,
-                              "UCHIHA-HITACHI SPOOFER ULTIMATE v4.0 (Refactored)",
-                              WS_OVERLAPPEDWINDOW, 100, 100, 950, 560,
+                              "UCHIHA-HITACHI SPOOFER ULTIMATE v4.0 (Optimized)",
+                              WS_OVERLAPPEDWINDOW, 100, 100, 1050, 670,
                               NULL, NULL, wc.hInstance, NULL);
 
         if (!g_hwnd) {
@@ -380,7 +529,7 @@ int main(int, char**) {
         UpdateWindow(g_hwnd);
 
         logger.Info("[MAIN] Giao diện khởi động thành công!");
-        logger.Info("[MAIN] Chào mừng bạn đến với Uchiha Spoofer!");
+        logger.Info("[MAIN] Chào mừng bạn đến với Uchiha Spoofer v4.0!");
 
         // Main game loop
         while (!g_done) {
