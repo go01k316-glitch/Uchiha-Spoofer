@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="HWID Spoofer/HWID Spoofer.vcxproj" Id="e8c33739-73b3-4a76-8d32-d215da1b02d0" />
+</Solution>

@@ -1,0 +1,10 @@
+﻿  HWID Spoofer.cpp
+  imgui.cpp
+  imgui_draw.cpp
+C:\Users\Linhadmin\source\repos\HWID Spoofer\HWID Spoofer\imgui_draw.cpp(136,10): error C1083: Cannot open include file: 'imstb_rectpack.h': No such file or directory
+  imgui_impl_dx11.cpp
+  imgui_impl_win32.cpp
+  imgui_tables.cpp
+  imgui_widgets.cpp
+C:\Users\Linhadmin\source\repos\HWID Spoofer\HWID Spoofer\imgui_widgets.cpp(4004,10): error C1083: Cannot open include file: 'imstb_textedit.h': No such file or directory
+  Generating Code...

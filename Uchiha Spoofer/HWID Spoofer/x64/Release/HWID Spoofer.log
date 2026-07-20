@@ -1,0 +1,12 @@
+﻿  HWID Spoofer.cpp
+  imgui.cpp
+  imgui_draw.cpp
+  imgui_impl_dx11.cpp
+  imgui_impl_win32.cpp
+  imgui_tables.cpp
+  imgui_widgets.cpp
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 2630 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  HWID Spoofer.vcxproj -> C:\Users\Linhadmin\source\repos\HWID Spoofer\x64\Release\HWID Spoofer.exe
