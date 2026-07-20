@@ -25,6 +25,12 @@ public:
     // Cập nhật danh tính
     void UpdateFakeIdentity(const Core::Identity& identity);
 
+    // Custom HWID input
+    void SetCustomIdentity(const Core::Identity& custom);
+
+    // Validate identity
+    bool ValidateIdentity(const Core::Identity& identity) const;
+
     // Lưu/tải cấu hình
     void SaveConfiguration();
     void LoadConfiguration();
